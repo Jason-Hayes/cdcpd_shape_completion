@@ -14,9 +14,8 @@ def callback(rgb, depth, camera_info):
     depth_list.append(depth);
     camera_info_list.append(camera_info);
 
-
-def main():
-    cam_topic = "camera_info"
+def read_bagfile():
+        cam_topic = "camera_info"
     rgb_topic = "image_color_rect"
     depth_topic = "image_depth_rect"
     rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset.bag"
@@ -39,6 +38,9 @@ def main():
             depth_sub.signalMessage(msg);
 
     bag.close()
+
+def main():
+    read_bagfile()
 
 if __name__ == "__main__":
     main()
