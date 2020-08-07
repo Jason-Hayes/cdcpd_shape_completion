@@ -7,8 +7,10 @@ import cv2 as cv
 import numpy as np
 import rospy
 import math
+from cdcpd_shape_completion.read_bagfile import imgs2pc
 from sensor_msgs.msg import Image, CameraInfo
 from shape_completion_training.voxelgrid.conversions import pointcloud_to_voxelgrid
+from shape_completion_training.model.model_runner import ModelRunner
 from rviz_voxelgrid_visuals import conversions
 from rviz_voxelgrid_visuals_msgs.msg import VoxelgridStamped
 
@@ -20,6 +22,10 @@ bridge = cv_bridge.CvBridge()
 
 pixel_len = 0.0000222222
 unit_scaling = 0.001
+
+trial_path = ""
+
+model_runner = ModelRunner(training=True, trial=trial_path)
 
 def imgs2pc(rgb, depth, intrinsics, mask):
     # rgb: cv2
@@ -120,20 +126,12 @@ def main():
     for i in range(len(rgb_list)):
         print(i)
         pc = imgs2pc(rgb_list[i], depth_list[i], camera_info_list[i], mask_list[i])
-        # print("point clouds:")
-        # print(pc.shape)
-        # np.savetxt("pc.txt", pc)
         voxelgrid = pointcloud_to_voxelgrid(pc, scale=scale, origin=origin, shape=shape)
-        # print("voxel grid:")
-        # print(voxelgrid.shape)
-        # for ind in range(100):
-            # np.savetxt("vg"+str(ind)+".txt", voxelgrid[ind])
+        completion = model_runner.model(voxelgrid)
         pub.publish(conversions.vox_to_voxelgrid_stamped(voxelgrid, # Numpy or Tensorflow
                                                   scale=scale, # Each voxel is a 1cm cube
                                                   frame_id='world', # In frame "world", same as rviz fixed frame 
                                                   origin=origin)) # Bottom left corner
-
-
 
 if __name__ == "__main__":
     main()
