@@ -13,6 +13,7 @@ from shape_completion_training.voxelgrid.conversions import pointcloud_to_voxelg
 from shape_completion_training.model.model_runner import ModelRunner
 from rviz_voxelgrid_visuals import conversions
 from rviz_voxelgrid_visuals_msgs.msg import VoxelgridStamped
+from skimage import measure
 
 rgb_list = []
 depth_list = []
@@ -23,38 +24,11 @@ bridge = cv_bridge.CvBridge()
 pixel_len = 0.0000222222
 unit_scaling = 0.001
 
+is_online = False
+
 trial_path = ""
 
 model_runner = ModelRunner(training=True, trial=trial_path)
-
-def imgs2pc(rgb, depth, intrinsics, mask):
-    # rgb: cv2
-    # depth: cv2
-    # intrinsics: np.array
-    # mask: cv2
-
-    # return: np.array
-    center_x = intrinsics[0, 2]
-    center_y = intrinsics[1, 2]
-
-    constant_x = 1.0 / (intrinsics[0, 0] * pixel_len)
-    constant_y = 1.0 / (intrinsics[1, 1] * pixel_len)
-
-    pc = np.zeros((0, 3))
-
-    for v in range(rgb.shape[0]):
-        # print("row: " + str(v))
-        for u in range(rgb.shape[1]):
-            d = depth[v, u]
-
-            if not math.isnan(d):
-                x = (u - center_x) * pixel_len * d * unit_scaling * constant_x
-                y = (v - center_y) * pixel_len * d * unit_scaling * constant_y
-                z = d * unit_scaling
-
-                if mask[v, u]:
-                    pc = np.concatenate((pc, np.array([[x, y, z]])))
-    return pc
 
 def CameraInfo2np(info):
     K = np.zeros((3, 3))
@@ -90,6 +64,8 @@ def color_segmentation():
         mask = cv.bitwise_or(mask1, mask2)
         mask_list.append(mask)
 
+def np2floatmsg():
+
 def read_bagfile():
     cam_topic = "camera_info"
     rgb_topic = "image_color_rect"
@@ -115,23 +91,29 @@ def read_bagfile():
 
     bag.close()
 
+def read_live():
+    print("WARNING")
+
 def main():
     origin = (-2.0, -1.0, 5.0) # "left most" point
     shape = (100, 100, 100) # how many grids there
     scale = 0.1 # how large the grid is
-    read_bagfile()
-    color_segmentation()
     rospy.init_node("cdcpd_shape_completion")
-    pub = rospy.Publisher('grid', VoxelgridStamped, queue_size=1)
-    for i in range(len(rgb_list)):
-        print(i)
-        pc = imgs2pc(rgb_list[i], depth_list[i], camera_info_list[i], mask_list[i])
-        voxelgrid = pointcloud_to_voxelgrid(pc, scale=scale, origin=origin, shape=shape)
-        completion = model_runner.model(voxelgrid)
-        pub.publish(conversions.vox_to_voxelgrid_stamped(voxelgrid, # Numpy or Tensorflow
-                                                  scale=scale, # Each voxel is a 1cm cube
-                                                  frame_id='world', # In frame "world", same as rviz fixed frame 
-                                                  origin=origin)) # Bottom left corner
+    # pub = rospy.Publisher('grid', VoxelgridStamped, queue_size=1)
+    if not is_online:
+        read_bagfile()
+        color_segmentation()
+        for i in range(len(rgb_list)):
+            pc = imgs2pc(rgb_list[i], depth_list[i], camera_info_list[i], mask_list[i])
+            voxelgrid = pointcloud_to_voxelgrid(pc, scale=scale, origin=origin, shape=shape)
+            completion = model_runner.model(voxelgrid)
+            verts, faces, normals, values = measure.marching_cubes(completion['predicted_occ'], 0)
+            # pub.publish(conversions.vox_to_voxelgrid_stamped(voxelgrid, # Numpy or Tensorflow
+            #                                          scale=scale, # Each voxel is a 1cm cube
+            #                                          frame_id='world', # In frame "world", same as rviz fixed frame
+            #                                          origin=origin)) # Bottom left corner
+    else:
+        read_live()
 
 if __name__ == "__main__":
     main()
