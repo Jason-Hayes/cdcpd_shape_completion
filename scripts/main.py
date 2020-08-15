@@ -5,9 +5,11 @@ import message_filters
 import cv_bridge
 import cv2 as cv
 import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import rospy
 import math
-from cdcpd_shape_completion.read_bagfile import imgs2pc
+from cdcpd_shape_completion.read_bagfile.helper import imgs2pc
 from sensor_msgs.msg import Image, CameraInfo
 from shape_completion_training.voxelgrid.conversions import pointcloud_to_voxelgrid
 from shape_completion_training.model.model_runner import ModelRunner
@@ -26,9 +28,27 @@ unit_scaling = 0.001
 
 is_online = False
 
-trial_path = ""
+trial_path = "/home/deformtrack/catkin_ws/src/probabilistic_shape_completion/shape_completion_training/trials/Flow/August_09_14-36-09_1486a44186"
 
-model_runner = ModelRunner(training=True, trial=trial_path)
+params = {
+    'num_latent_layers': 200,
+    # 'translation_pixel_range_x': 10,
+    # 'translation_pixel_range_y': 10,
+    # 'translation_pixel_range_z': 10,
+    # 'use_final_unet_layer': False,
+    # 'simulate_partial_completion': False,
+    # 'simulate_random_partial_completion': False,
+    'network': 'VAE',
+    # 'network': 'VAE_GAN',
+    # 'network': 'Augmented_VAE',
+    # 'network': 'Conditional_VCNN',
+    # 'network': 'NormalizingAE',
+    'batch_size': 16,
+    # 'learning_rate': 1e-3,
+    # 'flow': 'Flow/August_09_14-36-09_1486a44186'
+}
+
+model_runner = ModelRunner(training=True, trial_path=trial_path, group_name = 'Flow', params = params)
 
 def CameraInfo2np(info):
     K = np.zeros((3, 3))
@@ -44,33 +64,36 @@ def callback(rgb, depth, camera_info):
 
 def color_segmentation():
     # blue segmentation
-    # hsv_lower = (220, 0.2, 0.2)
-    # hsv_upper = (240, 1.0, 1.0)
+    hsv_lower = (220, 0.2, 0.2)
+    hsv_upper = (240, 1.0, 1.0)
     # green segmentation
     # hsv_lower = (100, 0.2, 0.2)
     # hsv_upper = (140, 1.0, 1.0)
     # red segmentation
-    hsv_lower_1 = (0, 0.2, 0.2)
-    hsv_upper_1 = (20, 1.0, 1.0)
-    hsv_lower_2 = (340, 0.2, 0.2)
-    hsv_upper_2 = (360, 1.0, 1.0)
+    # hsv_lower_1 = (0, 0.2, 0.2)
+    # hsv_upper_1 = (20, 1.0, 1.0)
+    # hsv_lower_2 = (340, 0.2, 0.2)
+    # hsv_upper_2 = (360, 1.0, 1.0)
     for rgb in rgb_list:
         rgb_f = np.float32(rgb)
         rgb_f = rgb_f / 255.0
         hsv = cv.cvtColor(rgb_f, cv.COLOR_BGR2HSV)
         # print(hsv[0, 0])
-        mask1 = cv.inRange(hsv, hsv_lower_1, hsv_upper_1)
-        mask2 = cv.inRange(hsv, hsv_lower_2, hsv_upper_2)
-        mask = cv.bitwise_or(mask1, mask2)
+		# red segmentation
+        # mask1 = cv.inRange(hsv, hsv_lower_1, hsv_upper_1)
+        # mask2 = cv.inRange(hsv, hsv_lower_2, hsv_upper_2)
+        # mask = cv.bitwise_or(mask1, mask2)
+        # other segmentation
+        mask = cv.inRange(hsv, hsv_lower, hsv_upper)
         mask_list.append(mask)
 
-def np2floatmsg():
+# def np2floatmsg():
 
 def read_bagfile():
     cam_topic = "camera_info"
     rgb_topic = "image_color_rect"
     depth_topic = "image_depth_rect"
-    rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/edge_cover_4.bag"
+    rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/shape_comp_1.bag"
 
     rgb_sub = message_filters.Subscriber(rgb_topic, Image)
     depth_sub = message_filters.Subscriber(depth_topic, Image)
@@ -95,23 +118,56 @@ def read_live():
     print("WARNING")
 
 def main():
-    origin = (-2.0, -1.0, 5.0) # "left most" point
-    shape = (100, 100, 100) # how many grids there
+    origin = (-1.2, -1.2, 0.0) # "left most" point
+    shape = (24, 24, 24) # how many grids there
     scale = 0.1 # how large the grid is
     rospy.init_node("cdcpd_shape_completion")
-    # pub = rospy.Publisher('grid', VoxelgridStamped, queue_size=1)
+    pub = rospy.Publisher('grid', VoxelgridStamped, queue_size=1)
     if not is_online:
         read_bagfile()
         color_segmentation()
-        for i in range(len(rgb_list)):
+        for i in range(1):
             pc = imgs2pc(rgb_list[i], depth_list[i], camera_info_list[i], mask_list[i])
             voxelgrid = pointcloud_to_voxelgrid(pc, scale=scale, origin=origin, shape=shape)
+            print("voxel grid sum")
+            print(voxelgrid.sum())
             completion = model_runner.model(voxelgrid)
-            verts, faces, normals, values = measure.marching_cubes(completion['predicted_occ'], 0)
-            # pub.publish(conversions.vox_to_voxelgrid_stamped(voxelgrid, # Numpy or Tensorflow
+            # print("completion vg:")
+            comp_np = completion.numpy()
+
+            comp_np[comp_np < 0.4] = 0
+            comp_np[comp_np >= 0.4] = 1
+
+            # print(comp_np.shape)
+            # print(comp_np.sum())
+            # print(comp_np)
+
+            # pub.publish(conversions.vox_to_voxelgrid_stamped(comp_np, # Numpy or Tensorflow
             #                                          scale=scale, # Each voxel is a 1cm cube
             #                                          frame_id='world', # In frame "world", same as rviz fixed frame
             #                                          origin=origin)) # Bottom left corner
+
+            verts, faces, normals, values = measure.marching_cubes_lewiner(comp_np, 0)
+            # Display resulting triangular mesh using Matplotlib. This can also be done
+			# with mayavi (see skimage.measure.marching_cubes_lewiner docstring).
+            fig = plt.figure(figsize=(10, 10))
+            ax = fig.add_subplot(111, projection='3d')
+
+			# Fancy indexing: `verts[faces]` to generate a collection of triangles
+            mesh = Poly3DCollection(verts[faces])
+            mesh.set_edgecolor('k')
+            ax.add_collection3d(mesh)
+
+            ax.set_xlabel("x-axis: a = 6 per ellipsoid")
+            ax.set_ylabel("y-axis: b = 10")
+            ax.set_zlabel("z-axis: c = 16")
+
+            ax.set_xlim(0, 24)  # a = 6 (times two for 2nd ellipsoid)
+            ax.set_ylim(0, 24)  # b = 10
+            ax.set_zlim(0, 24)  # c = 16
+
+            plt.tight_layout()
+            plt.savefig('shape_comp_' + str(i))
     else:
         read_live()
 
