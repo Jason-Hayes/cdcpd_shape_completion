@@ -15,19 +15,17 @@ from shape_completion_training.voxelgrid.conversions import pointcloud_to_voxelg
 from shape_completion_training.model.model_runner import ModelRunner
 from rviz_voxelgrid_visuals import conversions
 from rviz_voxelgrid_visuals_msgs.msg import VoxelgridStamped
+from std_msgs.msg import Float32MultiArray, MultiArrayDimension
 from skimage import measure
 import tensorflow as tf
 
 rgb_list = []
 depth_list = []
 camera_info_list = []
-mask_list = []
 bridge = cv_bridge.CvBridge()
 
-pixel_len = 0.0000222222
-unit_scaling = 0.001
-
 is_online = False
+is_simulation = True
 
     # group_defaults = {
     #     "NormalizingAE": # NormalizingAE/August_11_02-26-33_c94a291391
@@ -183,12 +181,22 @@ def CameraInfo2np(info):
             K[row, col] = info.K[row*3+col]
     return K
 
+def numpy2multiarray(np_array):
+    multiarray = Float32MultiArray()
+    multiarray.layout.dim = [MultiArrayDimension('dim%d' % i,
+                                                 np_array.shape[i],
+                                                 np_array.shape[i] * np_array.dtype.itemsize) for i in range(np_array.ndim)];
+    multiarray.data = np_array.reshape([1, -1])[0].tolist();
+    return multiarray
+
+
 def callback(rgb, depth, camera_info):
     rgb_list.append(bridge.imgmsg_to_cv2(rgb, desired_encoding="passthrough"))
     depth_list.append(bridge.imgmsg_to_cv2(depth, desired_encoding="passthrough"))
     camera_info_list.append(CameraInfo2np(camera_info))
 
 def color_segmentation():
+    mask_list = []
     # blue segmentation
     hsv_lower = (220, 0.2, 0.2)
     hsv_upper = (240, 1.0, 1.0)
@@ -212,14 +220,14 @@ def color_segmentation():
         # other segmentation
         mask = cv.inRange(hsv, hsv_lower, hsv_upper)
         mask_list.append(mask)
+    return mask_list
 
 # def np2floatmsg():
 
-def read_bagfile():
+def read_bagfile(rosbag_name):
     cam_topic = "camera_info"
     rgb_topic = "image_color_rect"
     depth_topic = "image_depth_rect"
-    rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/shape_comp_2.bag"
 
     rgb_sub = message_filters.Subscriber(rgb_topic, Image)
     depth_sub = message_filters.Subscriber(depth_topic, Image)
@@ -240,8 +248,36 @@ def read_bagfile():
 
     bag.close()
 
+def append_bagfile(in_bag_name, out_bag_name, msgs):
+    in_bag = rosbag.Bag(in_bag_name, 'r')
+    out_bag = rosbag.Bag(out_bag_name, 'w')
+
+    truth_topic = "groud_truth"
+    gripper_velocity_topic = "gripper_velocity"
+    gripper_info_topic = "gripper_info"
+    gripper_config_topic = "gripper_config"
+    cam_topic = "camera_info"
+    rgb_topic = "image_color_rect"
+    depth_topic = "image_depth_rect"
+    verts_topic = "comp_vertices"
+    faces_topic = "comp_faces"
+    normals_topic = "comp_topics"
+
+    for topic, msg, t in in_bag.read_messages(topics=[cam_topic, rgb_topic, depth_topic, truth_topic, gripper_config_topic, gripper_velocity_topic, gripper_info_topic]):
+        out_bag.write(topic, msg, t)
+
+    if is_simulation:
+        for frame in range(250):
+            t = rospy.Time(frame+1)
+            out_bag.write(verts_topic, msgs[0], t)
+            out_bag.write(faces_topic, msgs[1], t)
+            out_bag.write(normals_topic, msgs[2], t)
+
+    in_bag.close()
+    out_bag.close()
+
 def read_live():
-    print("WARNING")
+    print("NOT IMPLEMENTED")
 
 def main():
     origin = (-0.2, -0.2, 1.4) # "left most" point
@@ -252,58 +288,44 @@ def main():
     pub_incomp = rospy.Publisher('incomp', VoxelgridStamped, queue_size=1)
     pub_comp = rospy.Publisher('comp', VoxelgridStamped, queue_size=1)
     if not is_online:
-        read_bagfile()
-        color_segmentation()
-        for i in range(5):
-            pc = imgs2pc(rgb_list[i], depth_list[i], camera_info_list[i], mask_list[i])
-            voxelgrid = pointcloud_to_voxelgrid(pc, scale=scale, origin=origin, shape=shape)
-            voxel_inp = np.zeros(shape_inp)
-            voxel_inp[0, :, :, :, 0] = voxelgrid
-            freesapce = np.zeros(shape_inp)
-            inp = {
-                'known_occ': voxel_inp,
-                'known_free': freesapce,
-            }
-            completion = model_runner.model(inp)
-            # print("completion vg:")
-            comp_np = (completion['predicted_occ'].numpy())[0, :, :, :, 0]
-            comp_np[comp_np < 0.0001] = 0
-            comp_np[comp_np >= 0.0001] = 1
+        in_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/shape_comp_3.bag"
+        out_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/shape_comp_3_comp.bag"
+        read_bagfile(in_rosbag_name)
+        mask_list = color_segmentation()
+        pc = imgs2pc(rgb_list[0], depth_list[0], camera_info_list[0], mask_list[0])
+        voxelgrid = pointcloud_to_voxelgrid(pc, scale=scale, origin=origin, shape=shape)
+        voxel_inp = np.zeros(shape_inp)
+        voxel_inp[0, :, :, :, 0] = voxelgrid
+        freesapce = np.zeros(shape_inp)
+        inp = {
+            'known_occ': voxel_inp,
+            'known_free': freesapce,
+        }
+        completion = model_runner.model(inp)
+        # print("completion vg:")
+        comp_np = (completion['predicted_occ'].numpy())[0, :, :, :, 0]
+        comp_np[comp_np < 0.0001] = 0
+        comp_np[comp_np >= 0.0001] = 1
 
-            # print(comp_np.shape)
-            # print(comp_np.sum())
-            # print(comp_np)
+        # print(comp_np.shape)
+        # print(comp_np.sum())
+        # print(comp_np)
 
-            pub_incomp.publish(conversions.vox_to_voxelgrid_stamped(voxelgrid, # Numpy or Tensorflow
-                                                     scale=scale, # Each voxel is a 1cm cube
-                                                     frame_id='world', # In frame "world", same as rviz fixed frame
-                                                     origin=origin)) # Bottom left corner
-            pub_comp.publish(conversions.vox_to_voxelgrid_stamped(comp_np, # Numpy or Tensorflow
-                                                     scale=scale, # Each voxel is a 1cm cube
-                                                     frame_id='world', # In frame "world", same as rviz fixed frame
-                                                     origin=origin)) # Bottom left corner
+        pub_incomp.publish(conversions.vox_to_voxelgrid_stamped(voxelgrid, # Numpy or Tensorflow
+                                                                scale=scale, # Each voxel is a 1cm cube
+                                                                frame_id='world', # In frame "world", same as rviz fixed frame
+                                                                origin=origin)) # Bottom left corner
+        pub_comp.publish(conversions.vox_to_voxelgrid_stamped(comp_np, # Numpy or Tensorflow
+                                                              scale=scale, # Each voxel is a 1cm cube
+                                                              frame_id='world', # In frame "world", same as rviz fixed frame
+                                                              origin=origin)) # Bottom left corner
 
-            verts, faces, normals, values = measure.marching_cubes_lewiner(comp_np, 0)
-            # Display resulting triangular mesh using Matplotlib. This can also be done
-			# with mayavi (see skimage.measure.marching_cubes_lewiner docstring).
-            fig = plt.figure(figsize=(10, 10))
-            ax = fig.add_subplot(111, projection='3d')
-
-			# Fancy indexing: `verts[faces]` to generate a collection of triangles
-            mesh = Poly3DCollection(verts[faces])
-            mesh.set_edgecolor('k')
-            ax.add_collection3d(mesh)
-
-            ax.set_xlabel("x-axis: a = 6 per ellipsoid")
-            ax.set_ylabel("y-axis: b = 10")
-            ax.set_zlabel("z-axis: c = 16")
-
-            ax.set_xlim(0, 24)  # a = 6 (times two for 2nd ellipsoid)
-            ax.set_ylim(0, 24)  # b = 10
-            ax.set_zlim(0, 24)  # c = 16
-
-            plt.tight_layout()
-            plt.savefig('shape_comp_' + str(i))
+        verts, faces, normals, values = measure.marching_cubes_lewiner(comp_np, 0)
+        verts_msg = numpy2multiarray(verts)
+        faces_msg = numpy2multiarray(faces)
+        normals_msg = numpy2multiarray(normals)
+        app_msgs = [verts_msg, faces_msg, normals_msg]
+        append_bagfile(in_rosbag_name, out_rosbag_name, app_msgs)
     else:
         read_live()
 
