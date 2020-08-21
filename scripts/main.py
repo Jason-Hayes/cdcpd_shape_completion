@@ -186,7 +186,7 @@ def numpy2multiarray(np_array):
     multiarray.layout.dim = [MultiArrayDimension('dim%d' % i,
                                                  np_array.shape[i],
                                                  np_array.shape[i] * np_array.dtype.itemsize) for i in range(np_array.ndim)];
-    multiarray.data = np_array.reshape([1, -1])[0].tolist();
+    multiarray.data = np_array.astype(float).reshape([1, -1])[0].tolist();
     return multiarray
 
 
@@ -261,7 +261,7 @@ def append_bagfile(in_bag_name, out_bag_name, msgs):
     depth_topic = "image_depth_rect"
     verts_topic = "comp_vertices"
     faces_topic = "comp_faces"
-    normals_topic = "comp_topics"
+    normals_topic = "comp_normals"
 
     for topic, msg, t in in_bag.read_messages(topics=[cam_topic, rgb_topic, depth_topic, truth_topic, gripper_config_topic, gripper_velocity_topic, gripper_info_topic]):
         out_bag.write(topic, msg, t)
@@ -321,9 +321,10 @@ def main():
                                                               origin=origin)) # Bottom left corner
 
         verts, faces, normals, values = measure.marching_cubes_lewiner(comp_np, 0)
-        verts_msg = numpy2multiarray(verts)
-        faces_msg = numpy2multiarray(faces)
-        normals_msg = numpy2multiarray(normals)
+        verts = verts * scale + origin
+        verts_msg = numpy2multiarray(np.transpose(verts))
+        faces_msg = numpy2multiarray(np.transpose(faces))
+        normals_msg = numpy2multiarray(np.transpose(normals))
         app_msgs = [verts_msg, faces_msg, normals_msg]
         append_bagfile(in_rosbag_name, out_rosbag_name, app_msgs)
     else:
