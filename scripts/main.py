@@ -152,7 +152,7 @@ is_simulation = True
     #         },
     # }
 
-trial_path = "/home/deformtrack/catkin_ws/src/probabilistic_shape_completion/shape_completion_training/trials/3D_rec_gan/August_13_20-31-41_c94a291391"
+trial_path = "/home/deformtrack/catkin_ws/src/probabilistic_shape_completion/shape_completion_training/trials/3D_rec_gan/August_26_16-56-44_375f03c1f2"
 
 params = {
     'num_latent_layers': 200,
@@ -280,16 +280,16 @@ def read_live():
     print("NOT IMPLEMENTED")
 
 def main():
-    origin = (-0.2, -0.2, 1.4) # "left most" point
+    origin = (-0.7, -0.7, 2.0) # "left most" point
     shape = (64, 64, 64) # how many grids there
     shape_inp = (1, 64, 64, 64, 1)
-    scale = 0.01 # how large the grid is
+    scale = 1.4/64.0 # how large the grid is
     rospy.init_node("cdcpd_shape_completion")
     pub_incomp = rospy.Publisher('incomp', VoxelgridStamped, queue_size=1)
     pub_comp = rospy.Publisher('comp', VoxelgridStamped, queue_size=1)
     if not is_online:
-        in_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/shape_comp_3.bag"
-        out_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/shape_comp_3_comp.bag"
+        in_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/ICRA/rope_winding_cylinder_1.bag"
+        out_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/ICRA/rope_winding_cylinder_1_comp.bag"
         read_bagfile(in_rosbag_name)
         mask_list = color_segmentation()
         pc = imgs2pc(rgb_list[0], depth_list[0], camera_info_list[0], mask_list[0])
@@ -327,6 +327,7 @@ def main():
         normals_msg = numpy2multiarray(np.transpose(normals))
         app_msgs = [verts_msg, faces_msg, normals_msg]
         append_bagfile(in_rosbag_name, out_rosbag_name, app_msgs)
+        print("completion finished")
     else:
         read_live()
 
