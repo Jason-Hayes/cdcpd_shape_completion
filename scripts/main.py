@@ -11,7 +11,7 @@ import rospy
 import math
 from cdcpd_shape_completion.read_bagfile.helper import imgs2pc
 from sensor_msgs.msg import Image, CameraInfo
-from shape_completion_training.voxelgrid.conversions import pointcloud_to_voxelgrid
+from shape_completion_training.voxelgrid.conversions import pointcloud_to_voxelgrid, to_2_5D
 from shape_completion_training.model.model_runner import ModelRunner
 from rviz_voxelgrid_visuals import conversions
 from rviz_voxelgrid_visuals_msgs.msg import VoxelgridStamped
@@ -152,7 +152,7 @@ is_simulation = True
     #         },
     # }
 
-trial_path = "/home/deformtrack/catkin_ws/src/probabilistic_shape_completion/shape_completion_training/trials/3D_rec_gan/August_26_16-56-44_375f03c1f2"
+trial_path = "/home/deformtrack/catkin_ws/src/probabilistic_shape_completion/shape_completion_training/trials/3D_rec_gan_YCB/August_16_13-15-52_c94a291391"
 
 params = {
     'num_latent_layers': 200,
@@ -162,7 +162,7 @@ params = {
     # 'use_final_unet_layer': False,
     # 'simulate_partial_completion': False,
     # 'simulate_random_partial_completion': False,
-    'network': '3D_rec_gan',
+    'network': '3D_rec_gan_YCB',
     # 'network': 'VAE_GAN',
     # 'network': 'Augmented_VAE',
     # 'network': 'Conditional_VCNN',
@@ -288,18 +288,27 @@ def main():
     pub_incomp = rospy.Publisher('incomp', VoxelgridStamped, queue_size=1)
     pub_comp = rospy.Publisher('comp', VoxelgridStamped, queue_size=1)
     if not is_online:
-        in_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/ICRA/rope_winding_cylinder_1.bag"
-        out_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/ICRA/rope_winding_cylinder_1_comp.bag"
+        in_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/rope_edge_cover_1.bag"
+        out_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/rope_edge_cover_1_comp.bag"
         read_bagfile(in_rosbag_name)
         mask_list = color_segmentation()
         pc = imgs2pc(rgb_list[0], depth_list[0], camera_info_list[0], mask_list[0])
         voxelgrid = pointcloud_to_voxelgrid(pc, scale=scale, origin=origin, shape=shape)
+        known_occ = np.zeros(voxelgrid.shape)
+        for x in range(64):
+            for y in range(64):
+                for z in range(64):
+                    if voxelgrid[x, y, z] == 1:
+                        known_occ[63-z, y, x] = 1
+        known_occ = voxelgrid
         voxel_inp = np.zeros(shape_inp)
-        voxel_inp[0, :, :, :, 0] = voxelgrid
-        freesapce = np.zeros(shape_inp)
+        free_inp = np.zeros(shape_inp)
+        known_free = 1.0 - known_occ
+        voxel_inp[0, :, :, :, 0] = known_occ
+        free_inp[0, :, :, :, 0] = known_free
         inp = {
             'known_occ': voxel_inp,
-            'known_free': freesapce,
+            'known_free': free_inp,
         }
         completion = model_runner.model(inp)
         # print("completion vg:")
@@ -311,7 +320,7 @@ def main():
         # print(comp_np.sum())
         # print(comp_np)
 
-        pub_incomp.publish(conversions.vox_to_voxelgrid_stamped(voxelgrid, # Numpy or Tensorflow
+        pub_incomp.publish(conversions.vox_to_voxelgrid_stamped(known_occ, # Numpy or Tensorflow
                                                                 scale=scale, # Each voxel is a 1cm cube
                                                                 frame_id='world', # In frame "world", same as rviz fixed frame
                                                                 origin=origin)) # Bottom left corner
