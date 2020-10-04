@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import rospy
 import math
+from ycb_segmentation.seg_model import build_model
 from cdcpd_shape_completion.read_bagfile.helper import imgs2pc
 from sensor_msgs.msg import Image, CameraInfo
 from shape_completion_training.voxelgrid.conversions import pointcloud_to_voxelgrid, to_2_5D
@@ -294,8 +295,8 @@ def main():
     pub_incomp = rospy.Publisher('incomp', VoxelgridStamped, queue_size=1)
     pub_comp = rospy.Publisher('comp', VoxelgridStamped, queue_size=1)
     if not is_online:
-        in_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/rope_winding_cylinder_5.bag"
-        out_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test_blender/dataset/rope_winding_cylinder_5_comp.bag"
+        in_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test/dataset/09_19_2020/rope_winding_cylinder_exp_1.bag"
+        out_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test/dataset/09_19_2020/rope_winding_cylinder_exp_1_comp.bag"
         read_bagfile(in_rosbag_name)
         mask_list = color_segmentation()
         pc = imgs2pc(rgb_list[0], depth_list[0], camera_info_list[0], mask_list[0])
