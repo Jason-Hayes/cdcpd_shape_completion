@@ -314,11 +314,10 @@ def main():
         in_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test/dataset/09_19_2020/rope_winding_cylinder_exp_1.bag"
         out_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test/dataset/09_19_2020/rope_winding_cylinder_exp_1_comp.bag"
         read_bagfile(in_rosbag_name)
-        cv.imwrite("depth.png", depth_list[0])
-        cv.imwrite("rgb.png", rgb_list[0])
-        print("rgb_list length")
-        print(len(rgb_list))
-        seg_result = seg_model.forward(rgb_list[0])
+        seg_model.eval()
+        seg_input = torch.from_numpy(rgb_list[0])[None, ...].float().transpose(2, 3).transpose(1, 2)
+        print(seg_input.shape)
+        seg_result = seg_model(seg_input)
         print(seg_result)
         mask_list = color_segmentation()
         pc = imgs2pc(rgb_list[0], depth_list[0], camera_info_list[0], mask_list[0])
