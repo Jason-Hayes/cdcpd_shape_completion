@@ -2,13 +2,15 @@
 
 import rosbag
 import message_filters
-import cv_bridge
+# import cv_bridge
+# from cv_bridge.boost.cv_bridge_boost import getCvType
 import cv2 as cv
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import rospy
 import math
+import torch
 from ycb_segmentation.seg_model import build_model
 from cdcpd_shape_completion.read_bagfile.helper import imgs2pc
 from sensor_msgs.msg import Image, CameraInfo
@@ -23,7 +25,7 @@ import tensorflow as tf
 rgb_list = []
 depth_list = []
 camera_info_list = []
-bridge = cv_bridge.CvBridge()
+# bridge = cv_bridge.CvBridge()
 
 is_online = False
 is_simulation = True
@@ -190,10 +192,19 @@ def numpy2multiarray(np_array):
     multiarray.data = np_array.astype(float).reshape([1, -1])[0].tolist();
     return multiarray
 
+def depthImg2np(img_msg):
+    im = np.ndarray(shape=(img_msg.height, img_msg.width),
+                           dtype=np.uint16, buffer=img_msg.data)
+    return im;
+
+def rgbImg2np(img_msg):
+    im = np.ndarray(shape=(img_msg.height, img_msg.width, 3),
+                               dtype=np.uint8, buffer=img_msg.data)
+    return im;
 
 def callback(rgb, depth, camera_info):
-    rgb_list.append(bridge.imgmsg_to_cv2(rgb, desired_encoding="passthrough"))
-    depth_list.append(bridge.imgmsg_to_cv2(depth, desired_encoding="passthrough"))
+    rgb_list.append(rgbImg2np(rgb))
+    depth_list.append(depthImg2np(depth))
     camera_info_list.append(CameraInfo2np(camera_info))
 
 def color_segmentation():
@@ -226,9 +237,9 @@ def color_segmentation():
 # def np2floatmsg():
 
 def read_bagfile(rosbag_name):
-    cam_topic = "camera_info"
-    rgb_topic = "image_color_rect"
-    depth_topic = "image_depth_rect"
+    cam_topic = "/kinect2_victor_head/qhd/camera_info"
+    rgb_topic = "/kinect2_victor_head/qhd/image_color_rect"
+    depth_topic = "/kinect2_victor_head/qhd/image_depth_rect"
 
     rgb_sub = message_filters.Subscriber(rgb_topic, Image)
     depth_sub = message_filters.Subscriber(depth_topic, Image)
@@ -281,10 +292,15 @@ def read_live():
     print("NOT IMPLEMENTED")
 
 def main():
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    num_classes = 21
+    seg_model = build_model(num_classes)
+    seg_model.to(device)
+
 	# cloth setting
     # origin = (-0.5, -0.5, 1.0) # "left most" point
     # scale = 1.0/64.0 # how large the grid is
-	
+
 	#rope setting
     origin = (-0.7, -0.7, 2.0)
     scale = 1.4/64.0
@@ -298,6 +314,12 @@ def main():
         in_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test/dataset/09_19_2020/rope_winding_cylinder_exp_1.bag"
         out_rosbag_name = "/home/deformtrack/catkin_ws/src/cdcpd_test/dataset/09_19_2020/rope_winding_cylinder_exp_1_comp.bag"
         read_bagfile(in_rosbag_name)
+        cv.imwrite("depth.png", depth_list[0])
+        cv.imwrite("rgb.png", rgb_list[0])
+        print("rgb_list length")
+        print(len(rgb_list))
+        seg_result = seg_model.forward(rgb_list[0])
+        print(seg_result)
         mask_list = color_segmentation()
         pc = imgs2pc(rgb_list[0], depth_list[0], camera_info_list[0], mask_list[0])
         voxelgrid = pointcloud_to_voxelgrid(pc, scale=scale, origin=origin, shape=shape)
